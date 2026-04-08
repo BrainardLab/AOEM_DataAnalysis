@@ -1,55 +1,57 @@
-function results = checkEstimationBias(nReps)
-% results = checkEstimationBias(nReps)
+function results = checkEstimationBias(nReps, b_noise_sd)
+% results = checkEstimationBias(nReps, b_noise_sd)
 %
 % Runs the YesNoTSD staircase simulation and MLE fitting nReps times,
 % comparing two parameterisations:
 %
 %   AB param   : theta = [log(A), log(b), criteria...]
-%                R(I) = A * I^b
+%                R(I) = A * I^b   (both parameters free)
 %
-%   Thresh param : theta = [log(I_thresh), log(b), criteria...]
-%                R(I) = (I / I_thresh)^b
-%                where I_thresh is the intensity producing d' = dPrimeRef = 1.
-%                Anchors one parameter at the staircase intensity, reducing
-%                correlation between the two free parameters.
+%   Fixed-b param : theta = [log(I_thresh), criteria...]
+%                R(I) = (I / I_thresh)^b_fixed
+%                b is fixed at b_true + N(0, b_noise_sd), simulating a
+%                calibration estimate. I_thresh is the one free scale
+%                parameter, anchored where staircase data concentrates.
 %
-% Input:
-%   nReps  - number of simulation replications (default: 50)
+% Note: a pure threshold reparameterisation (A,b) -> (I_thresh,b) is
+% mathematically identical to the AB param and gives the same results.
+% The fixed-b version genuinely reduces the problem to one free scale
+% parameter, which is why it is expected to show less bias/variance.
+%
+% Inputs:
+%   nReps      - number of simulation replications (default: 50)
+%   b_noise_sd - SD of calibration error on b (default: 0.1)
 %
 % Output:
-%   results - struct with fields for both parameterisations:
-%     AB:     A_hat, b_hat, I_hat       (nReps x 1 or nReps x nDPrime)
-%     Thresh: Ithresh_hat, b_hat, I_hat
-%     true values and dPrimeTargets
+%   results - struct with fields for both parameterisations
 %
 % Example:
-%   results = checkEstimationBias(50);
+%   results = checkEstimationBias(50, 0.1);
 %
 % History:
 %   2026-04-08  DHB, HES, ClaudeAI  wrote it.
-%   2026-04-08  DHB, HES, ClaudeAI  added threshold parameterisation.
+%   2026-04-08  DHB, HES, ClaudeAI  added fixed-b parameterisation.
 
-if nargin < 1
-    nReps = 50;
-end
+if nargin < 1;  nReps      = 50;   end
+if nargin < 2;  b_noise_sd = 0.1;  end
 
 %% ---- True parameters (must match YesNoTSDSimulation.m) -------------------
 
 A_true = 1.0;
 b_true = 0.8;
 
-nResp           = 6;
-Icrit_true      = linspace(0.3, 2, nResp-1);
-beta_true       = responseFunction(Icrit_true, [A_true, b_true]);
-nCrit           = numel(beta_true);
+nResp               = 6;
+Icrit_true          = linspace(0.3, 2, nResp-1);
+beta_true           = responseFunction(Icrit_true, [A_true, b_true]);
+nCrit               = numel(beta_true);
 nStaircaseRespondNo = 3;
-dPrimeTargets   = [0.75, 1, 1.25];
-nDPrime         = numel(dPrimeTargets);
-dPrimeRef       = 1.0;   % reference d' for threshold parameterisation
+dPrimeTargets       = [0.75, 1, 1.25];
+nDPrime             = numel(dPrimeTargets);
+dPrimeRef           = 1.0;   % reference d' for I_thresh definition
 
-% True threshold intensities: invert R = A*I^b  =>  I = (d'/A)^(1/b)
+% True threshold intensities
 I_true       = (dPrimeTargets / A_true).^(1 / b_true);
-Ithresh_true = (dPrimeRef    / A_true).^(1 / b_true);   % true I at d'=dPrimeRef
+Ithresh_true = (dPrimeRef    / A_true).^(1 / b_true);
 
 %% ---- Staircase / simulation settings ------------------------------------
 
@@ -64,25 +66,25 @@ Imin                = 0.01;
 Imax                = 3.0;
 stepSizes           = log(1.15) * [2, 1];
 
-cMax  = 3.5;
-opts  = optimoptions('fmincon', 'Display', 'off', ...
+cMax = 3.5;
+opts = optimoptions('fmincon', 'Display', 'off', ...
     'MaxIterations', 5000, 'MaxFunctionEvaluations', 50000);
 
 %% ---- Storage -------------------------------------------------------------
 
-% AB parameterisation
-A_hat_all     = zeros(nReps, 1);
-b_hat_ab_all  = zeros(nReps, 1);
-I_hat_ab_all  = zeros(nReps, nDPrime);
+% AB parameterisation (both A and b free)
+A_hat_all    = zeros(nReps, 1);
+b_hat_ab_all = zeros(nReps, 1);
+I_hat_ab_all = zeros(nReps, nDPrime);
 
-% Threshold parameterisation
+% Fixed-b parameterisation (b fixed at b_true + noise, I_thresh free)
+b_fixed_all      = zeros(nReps, 1);
 Ithresh_hat_all  = zeros(nReps, 1);
-b_hat_th_all     = zeros(nReps, 1);
-I_hat_th_all     = zeros(nReps, nDPrime);
+I_hat_fb_all     = zeros(nReps, nDPrime);
 
 %% ---- Replication loop ----------------------------------------------------
 
-fprintf('Running %d replications...\n', nReps);
+fprintf('Running %d replications (b_noise_sd = %.2f)...\n', nReps, b_noise_sd);
 for rep = 1:nReps
 
     rng(rep);
@@ -112,142 +114,143 @@ for rep = 1:nReps
 
     c_init = linspace(0.5, 3.0, nCrit);
 
-    % --- AB parameterisation fit ---
-    theta0_ab  = [log(1); log(1); c_init(1); log(diff(c_init))'];
-    thetaHat   = fmincon(@(th) negLogLikAB(th, I, y), theta0_ab, ...
+    % --- AB parameterisation ---
+    theta0_ab = [log(1); log(1); c_init(1); log(diff(c_init))'];
+    thAB      = fmincon(@(th) negLogLikAB(th, I, y), theta0_ab, ...
         [], [], [], [], [], [], @(th) critBounds(th, cMax, 3), opts);
 
-    A_hat              = exp(thetaHat(1));
-    b_hat_ab           = exp(thetaHat(2));
-    A_hat_all(rep)     = A_hat;
-    b_hat_ab_all(rep)  = b_hat_ab;
+    A_hat            = exp(thAB(1));
+    b_hat_ab         = exp(thAB(2));
+    A_hat_all(rep)   = A_hat;
+    b_hat_ab_all(rep)= b_hat_ab;
     I_hat_ab_all(rep,:) = (dPrimeTargets / A_hat).^(1 / b_hat_ab);
 
-    % --- Threshold parameterisation fit ---
-    % R(I) = (I / I_thresh)^b,  so d' at I_thresh = dPrimeRef = 1
-    theta0_th  = [log(Ithresh_true); log(1); c_init(1); log(diff(c_init))'];
-    thetaHat_th = fmincon(@(th) negLogLikThresh(th, I, y, dPrimeRef), theta0_th, ...
-        [], [], [], [], [], [], @(th) critBounds(th, cMax, 3), opts);
+    % --- Fixed-b parameterisation ---
+    % b drawn from calibration distribution: b_true + noise
+    b_fixed          = b_true + b_noise_sd * randn();
+    b_fixed_all(rep) = b_fixed;
 
-    Ithresh_hat           = exp(thetaHat_th(1));
-    b_hat_th              = exp(thetaHat_th(2));
-    Ithresh_hat_all(rep)  = Ithresh_hat;
-    b_hat_th_all(rep)     = b_hat_th;
-    % Invert thresh model: I = I_thresh * (d' / dPrimeRef)^(1/b)
-    I_hat_th_all(rep,:)   = Ithresh_hat .* (dPrimeTargets / dPrimeRef).^(1 / b_hat_th);
+    theta0_fb = [log(Ithresh_true); c_init(1); log(diff(c_init))'];
+    thFB      = fmincon(@(th) negLogLikFixedB(th, I, y, b_fixed, dPrimeRef), theta0_fb, ...
+        [], [], [], [], [], [], @(th) critBounds(th, cMax, 2), opts);
 
-    fprintf('  Rep %3d/%d:  AB: A=%.3f b=%.3f  |  Thresh: Ith=%.3f b=%.3f\n', ...
-        rep, nReps, A_hat, b_hat_ab, Ithresh_hat, b_hat_th);
+    Ithresh_hat            = exp(thFB(1));
+    Ithresh_hat_all(rep)   = Ithresh_hat;
+    % Invert: I = I_thresh * (d' / dPrimeRef)^(1/b_fixed)
+    I_hat_fb_all(rep,:)    = Ithresh_hat .* (dPrimeTargets / dPrimeRef).^(1 / b_fixed);
+
+    fprintf('  Rep %3d/%d:  AB: A=%.3f b=%.3f  |  Fixed-b: b_used=%.3f Ith=%.3f\n', ...
+        rep, nReps, A_hat, b_hat_ab, b_fixed, Ithresh_hat);
 end
 
 %% ---- Summary tables ------------------------------------------------------
 
-fprintf('\n=== AB parameterisation (%d reps) ===\n', nReps);
-fprintf('Parameter  True    Mean     Bias    SD\n');
-fprintf('-------------------------------------------\n');
-fprintf('A          %.3f   %.3f    %+.3f   %.3f\n', ...
+fprintf('\n=== AB parameterisation — scale parameters (%d reps) ===\n', nReps);
+fprintf('Param   True    Mean     Bias    SD\n');
+fprintf('--------------------------------------\n');
+fprintf('A       %.3f   %.3f    %+.3f   %.3f\n', ...
     A_true, mean(A_hat_all), mean(A_hat_all) - A_true, std(A_hat_all));
-fprintf('b          %.3f   %.3f    %+.3f   %.3f\n', ...
+fprintf('b       %.3f   %.3f    %+.3f   %.3f\n', ...
     b_true, mean(b_hat_ab_all), mean(b_hat_ab_all) - b_true, std(b_hat_ab_all));
 
-fprintf('\n=== Threshold parameterisation (%d reps) ===\n', nReps);
-fprintf('Parameter    True    Mean     Bias    SD\n');
-fprintf('-------------------------------------------\n');
-fprintf('I_thresh     %.3f   %.3f    %+.3f   %.3f\n', ...
+fprintf('\n=== Fixed-b parameterisation — scale parameters (%d reps) ===\n', nReps);
+fprintf('Param      True    Mean     Bias    SD\n');
+fprintf('-----------------------------------------\n');
+fprintf('b (fixed)  %.3f   %.3f    %+.3f   %.3f\n', ...
+    b_true, mean(b_fixed_all), mean(b_fixed_all) - b_true, std(b_fixed_all));
+fprintf('I_thresh   %.3f   %.3f    %+.3f   %.3f\n', ...
     Ithresh_true, mean(Ithresh_hat_all), mean(Ithresh_hat_all) - Ithresh_true, std(Ithresh_hat_all));
-fprintf('b            %.3f   %.3f    %+.3f   %.3f\n', ...
-    b_true, mean(b_hat_th_all), mean(b_hat_th_all) - b_true, std(b_hat_th_all));
 
-fprintf('\n=== Threshold intensity estimates: I vs log(I) ===\n');
-fprintf('\n  %-12s  %6s  %10s  %10s  %6s  %10s  %10s  %6s\n', ...
-    '', 'I_true', 'AB mean', 'AB bias', 'AB SD', 'Th mean', 'Th bias', 'Th SD');
-fprintf('  %s\n', repmat('-',1,75));
+fprintf('\n=== Threshold intensity estimates ===\n');
+hdr = '  %-13s  %7s  %8s  %8s  %6s  %8s  %8s  %6s\n';
+sep = repmat('-', 1, 72);
+fprintf(hdr, '', 'I_true', 'AB mean', 'AB bias', 'AB SD', 'FB mean', 'FB bias', 'FB SD');
+fprintf('  %s\n', sep);
 for k = 1:nDPrime
-    fprintf('  d''=%.2f (I)   %6.3f  %10.3f  %10+.3f  %6.3f  %10.3f  %10+.3f  %6.3f\n', ...
+    fprintf('  d''=%.2f  (I)    %7.3f  %8.3f  %8+.3f  %6.3f  %8.3f  %8+.3f  %6.3f\n', ...
         dPrimeTargets(k), I_true(k), ...
         mean(I_hat_ab_all(:,k)), mean(I_hat_ab_all(:,k)) - I_true(k), std(I_hat_ab_all(:,k)), ...
-        mean(I_hat_th_all(:,k)), mean(I_hat_th_all(:,k)) - I_true(k), std(I_hat_th_all(:,k)));
+        mean(I_hat_fb_all(:,k)), mean(I_hat_fb_all(:,k)) - I_true(k), std(I_hat_fb_all(:,k)));
 end
-fprintf('\n  %-12s  %6s  %10s  %10s  %6s  %10s  %10s  %6s\n', ...
-    '', 'logI_true', 'AB mean', 'AB bias', 'AB SD', 'Th mean', 'Th bias', 'Th SD');
-fprintf('  %s\n', repmat('-',1,75));
+fprintf('  %s\n', sep);
 for k = 1:nDPrime
-    fprintf('  d''=%.2f (logI) %6.3f  %10.3f  %10+.3f  %6.3f  %10.3f  %10+.3f  %6.3f\n', ...
+    fprintf('  d''=%.2f  (logI) %7.3f  %8.3f  %8+.3f  %6.3f  %8.3f  %8+.3f  %6.3f\n', ...
         dPrimeTargets(k), log(I_true(k)), ...
         mean(log(I_hat_ab_all(:,k))), mean(log(I_hat_ab_all(:,k))) - log(I_true(k)), std(log(I_hat_ab_all(:,k))), ...
-        mean(log(I_hat_th_all(:,k))), mean(log(I_hat_th_all(:,k))) - log(I_true(k)), std(log(I_hat_th_all(:,k))));
+        mean(log(I_hat_fb_all(:,k))), mean(log(I_hat_fb_all(:,k))) - log(I_true(k)), std(log(I_hat_fb_all(:,k))));
 end
 
 %% ---- Figure --------------------------------------------------------------
-% Row 1: b_hat from both parameterisations (b is common to both)
-%        A_hat (AB) | I_thresh_hat (Thresh)
-% Row 2: I_hat comparison — AB (left) vs Thresh (right)
+% [1,1] b_hat (AB, estimated) vs b_fixed (fixed-b, drawn from calibration)
+% [1,2] A_hat (AB) and I_thresh_hat (fixed-b) — the free scale parameters
+% [2,1] I_hat from AB param
+% [2,2] I_hat from fixed-b param
 
 colors = lines(nDPrime);
 
 figure('Color', 'w');
 tiledlayout(2, 2, 'TileSpacing', 'compact', 'Padding', 'compact');
 
-% --- [1,1] b_hat: both parameterisations overlaid ---
+% --- [1,1] b values used ---
 nexttile;
-histogram(b_hat_ab_all, 12, 'FaceColor', [0.2 0.5 0.8], 'FaceAlpha', 0.5, ...
-    'DisplayName', 'AB param');
+histogram(b_hat_ab_all, 12, 'FaceColor', [0.2 0.5 0.8], 'FaceAlpha', 0.6, ...
+    'DisplayName', 'b_{hat} (AB, estimated)');
 hold on;
-histogram(b_hat_th_all, 12, 'FaceColor', [0.9 0.4 0.1], 'FaceAlpha', 0.5, ...
-    'DisplayName', 'Thresh param');
+histogram(b_fixed_all,  12, 'FaceColor', [0.9 0.4 0.1], 'FaceAlpha', 0.6, ...
+    'DisplayName', sprintf('b_{fixed} (calibration, SD=%.2f)', b_noise_sd));
 xline(b_true, 'k-', 'LineWidth', 2, 'HandleVisibility', 'off');
-xlabel('b_{hat}');
-title(sprintf('b  (true=%.2f)', b_true));
-legend('Location', 'northeast');
+xlabel('b');
+title(sprintf('b  (true = %.2f)', b_true));
+legend('Location', 'best');
 
-% --- [1,2] A_hat (AB) and I_thresh_hat (Thresh) ---
+% --- [1,2] Free scale parameter per method ---
 nexttile;
-histogram(A_hat_all, 12, 'FaceColor', [0.2 0.5 0.8], 'FaceAlpha', 0.6, ...
+histogram(A_hat_all,       12, 'FaceColor', [0.2 0.5 0.8], 'FaceAlpha', 0.6, ...
     'DisplayName', 'A_{hat} (AB)');
 hold on;
 histogram(Ithresh_hat_all, 12, 'FaceColor', [0.9 0.4 0.1], 'FaceAlpha', 0.6, ...
-    'DisplayName', 'I_{thresh} (Thresh)');
+    'DisplayName', 'I_{thresh} (fixed-b)');
 xline(A_true,       'b-', 'LineWidth', 2, 'HandleVisibility', 'off');
 xline(Ithresh_true, 'r-', 'LineWidth', 2, 'HandleVisibility', 'off');
 xlabel('Estimate');
-title(sprintf('A_{hat} (true=%.2f)  |  I_{thresh} (true=%.2f)', A_true, Ithresh_true));
-legend('Location', 'northeast');
+title(sprintf('Free scale param: A_{true}=%.2f, I_{thresh,true}=%.2f', A_true, Ithresh_true));
+legend('Location', 'best');
 
-% --- [2,1] I_hat from AB parameterisation ---
+% --- [2,1] I_hat from AB ---
 nexttile;
 hold on;
 for k = 1:nDPrime
     histogram(I_hat_ab_all(:,k), 10, 'FaceColor', colors(k,:), 'FaceAlpha', 0.6, ...
         'DisplayName', sprintf("d'=%.2f", dPrimeTargets(k)));
-    xline(I_true(k),               '-',  'Color', colors(k,:), 'LineWidth', 2,   'HandleVisibility', 'off');
+    xline(I_true(k),                '-',  'Color', colors(k,:), 'LineWidth', 2,   'HandleVisibility', 'off');
     xline(mean(I_hat_ab_all(:,k)), '--', 'Color', colors(k,:), 'LineWidth', 1.5, 'HandleVisibility', 'off');
 end
 xlabel('I_{hat}');
 title('AB param  (solid=true, dashed=mean)');
 legend('Location', 'northeast');
 
-% --- [2,2] I_hat from threshold parameterisation ---
+% --- [2,2] I_hat from fixed-b ---
 nexttile;
 hold on;
 for k = 1:nDPrime
-    histogram(I_hat_th_all(:,k), 10, 'FaceColor', colors(k,:), 'FaceAlpha', 0.6, ...
+    histogram(I_hat_fb_all(:,k), 10, 'FaceColor', colors(k,:), 'FaceAlpha', 0.6, ...
         'DisplayName', sprintf("d'=%.2f", dPrimeTargets(k)));
-    xline(I_true(k),               '-',  'Color', colors(k,:), 'LineWidth', 2,   'HandleVisibility', 'off');
-    xline(mean(I_hat_th_all(:,k)), '--', 'Color', colors(k,:), 'LineWidth', 1.5, 'HandleVisibility', 'off');
+    xline(I_true(k),                '-',  'Color', colors(k,:), 'LineWidth', 2,   'HandleVisibility', 'off');
+    xline(mean(I_hat_fb_all(:,k)), '--', 'Color', colors(k,:), 'LineWidth', 1.5, 'HandleVisibility', 'off');
 end
 xlabel('I_{hat}');
-title('Thresh param  (solid=true, dashed=mean)');
+title(sprintf('Fixed-b param  (b_{noise} SD=%.2f)', b_noise_sd));
 legend('Location', 'northeast');
 
 %% ---- Pack results --------------------------------------------------------
 
-results.AB.A_hat         = A_hat_all;
-results.AB.b_hat         = b_hat_ab_all;
-results.AB.I_hat         = I_hat_ab_all;
+results.AB.A_hat    = A_hat_all;
+results.AB.b_hat    = b_hat_ab_all;
+results.AB.I_hat    = I_hat_ab_all;
 
-results.Thresh.Ithresh_hat = Ithresh_hat_all;
-results.Thresh.b_hat       = b_hat_th_all;
-results.Thresh.I_hat       = I_hat_th_all;
+results.FixedB.b_fixed    = b_fixed_all;
+results.FixedB.Ithresh_hat = Ithresh_hat_all;
+results.FixedB.I_hat      = I_hat_fb_all;
 
 results.A_true        = A_true;
 results.b_true        = b_true;
@@ -255,20 +258,19 @@ results.Ithresh_true  = Ithresh_true;
 results.I_true        = I_true;
 results.dPrimeTargets = dPrimeTargets;
 results.dPrimeRef     = dPrimeRef;
+results.b_noise_sd    = b_noise_sd;
 
 end
 
 %% ======== Local functions =================================================
 
 function [c, ceq] = critBounds(theta, cMax, critStart)
-% critStart = index of first criterion parameter in theta (3 for both models)
     beta = unpackCrit(theta(critStart:end));
     c    = beta(:) - cMax;
     ceq  = [];
 end
 
 function nll = negLogLikAB(theta, I, y)
-% AB parameterisation: R(I) = A * I^b
     A    = exp(theta(1));
     b    = exp(theta(2));
     beta = unpackCrit(theta(3:end));
@@ -277,19 +279,15 @@ function nll = negLogLikAB(theta, I, y)
     nll  = ratingNLL(R, y, beta);
 end
 
-function nll = negLogLikThresh(theta, I, y, dPrimeRef)
-% Threshold parameterisation: R(I) = dPrimeRef * (I / I_thresh)^b
-% I_thresh is the intensity producing d' = dPrimeRef.
+function nll = negLogLikFixedB(theta, I, y, b_fixed, dPrimeRef)
     I_thresh = exp(theta(1));
-    b        = exp(theta(2));
-    beta     = unpackCrit(theta(3:end));
-    R        = dPrimeRef .* (max(I, 0) ./ I_thresh) .^ b;
+    beta     = unpackCrit(theta(2:end));
+    R        = dPrimeRef .* (max(I, 0) ./ I_thresh) .^ b_fixed;
     R(I == 0) = 0;
     nll      = ratingNLL(R, y, beta);
 end
 
 function nll = ratingNLL(R, y, beta)
-% Shared negative log-likelihood for ordinal rating data.
     bounds = [-Inf, beta, Inf];
     lo     = bounds(y);
     hi     = bounds(y + 1);
@@ -311,7 +309,5 @@ function p = Phi(z)
 end
 
 function R = responseFunction(I, theta)
-    A = theta(1);
-    b = theta(2);
-    R = A .* (I .^ b);
+    R = theta(1) .* (I .^ theta(2));
 end
