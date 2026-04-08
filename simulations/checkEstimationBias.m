@@ -123,13 +123,23 @@ fprintf('A          %.3f   %.3f    %+.3f   %.3f\n', ...
 fprintf('b          %.3f   %.3f    %+.3f   %.3f\n', ...
     b_true, mean(b_hat_all), mean(b_hat_all) - b_true, std(b_hat_all));
 
-fprintf('\nThreshold intensities (I_hat vs I_true):\n');
+fprintf('\nThreshold intensities — linear I:\n');
 fprintf('d-prime   I_true   Mean I_hat   Bias      SD\n');
 fprintf('------------------------------------------------\n');
 for k = 1:nDPrime
     fprintf('  %.2f     %.3f    %.3f       %+.3f     %.3f\n', ...
         dPrimeTargets(k), I_true(k), mean(I_hat_all(:,k)), ...
         mean(I_hat_all(:,k)) - I_true(k), std(I_hat_all(:,k)));
+end
+
+fprintf('\nThreshold intensities — log(I):\n');
+fprintf('d-prime   log(I_true)   Mean log(I_hat)   Bias      SD\n');
+fprintf('----------------------------------------------------------\n');
+for k = 1:nDPrime
+    logI_hat = log(I_hat_all(:,k));
+    fprintf('  %.2f     %+.3f         %+.3f             %+.3f     %.3f\n', ...
+        dPrimeTargets(k), log(I_true(k)), mean(logI_hat), ...
+        mean(logI_hat) - log(I_true(k)), std(logI_hat));
 end
 
 %% ---- Figure --------------------------------------------------------------
