@@ -98,12 +98,12 @@ stepSizes  = log(stepFactor) * [2, 1];   % two step sizes, shrinking after rever
 
 staircases = cell(nStaircases, 1);
 for s = 1:nStaircases
-    staircases{s} = Staircase('standard', I0, ...
+    staircases{s} = Staircase('standard', log(I0), ...
         'StepSizes', stepSizes, ...
         'NUp',       nDown(s), ...   % correct responses to step down
         'NDown',     nUp(s),   ...   % incorrect responses to step up
-        'MaxValue',  Imax,     ...
-        'MinValue',  Imin);
+        'MaxValue',  log(Imax), ...
+        'MinValue',  log(Imin));
 end
 
 %% ---- Simulate trial sequence ----------------------------------------------
@@ -127,7 +127,7 @@ for t = 1:nTrials
         signalCount = signalCount + 1;
         s           = mod(signalCount - 1, nStaircases) + 1;
         sIdx(t)     = s;
-        I(t)        = getCurrentValue(staircases{s});
+        I(t)        = exp(getCurrentValue(staircases{s}));
 
         % Sample noisy internal response and assign rating.
         x    = responseFunction(I(t), [A_true, b_true]) + randn();
@@ -135,7 +135,7 @@ for t = 1:nTrials
 
         % Update staircase.  Response = 1 ("yes") iff rating exceeds threshold.
         response      = double(y(t) > nStaircaseRespondNo);
-        staircases{s} = updateForTrial(staircases{s}, I(t), response);
+        staircases{s} = updateForTrial(staircases{s}, log(I(t)), response);
     end
 
     % Catch trials also get a rating (used in MLE fitting and ROC analysis).
