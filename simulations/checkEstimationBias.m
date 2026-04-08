@@ -1,17 +1,16 @@
 function results = checkEstimationBias(nReps, b_noise_sd, staircaseType)
 % results = checkEstimationBias(nReps, b_noise_sd, staircaseType)
 %
-% Runs the YesNoTSD staircase simulation and MLE fitting nReps times,
-% comparing two fitting parameterisations:
+% Runs nReps staircase sessions via runYesNoTSDSession and compares two
+% fitting approaches:
 %
-%   AB param      : R(I) = A * I^b   (both A and b free)
-%   Fixed-b param : R(I) = (I/I_thresh)^b_fixed
-%                   b fixed at b_true + N(0, b_noise_sd); only I_thresh free.
+%   AB param    : fits A and b freely  (done inside runYesNoTSDSession)
+%   Fixed-b     : fixes b at b_true + N(0, b_noise_sd), fits only I_thresh
+%                 where R(I) = (I/I_thresh)^b_fixed.
 %
-% Staircase type is controlled by staircaseType:
-%   'standard' : 1-up/2-down staircase in log(I) space (default)
-%   'quest'    : 3 interleaved QUESTs targeting P(yes) = [0.6, 0.75, 0.9]
-%                for broader intensity coverage
+% Staircase type is shared with YesNoTSDSimulation.m:
+%   'standard' : 1-up/2-down, 1 staircase x 150 trials  (default)
+%   'quest'    : 3 interleaved QUESTs x 50 trials = 150 total
 %
 % Inputs:
 %   nReps         - number of replications (default: 50)
@@ -19,178 +18,123 @@ function results = checkEstimationBias(nReps, b_noise_sd, staircaseType)
 %   staircaseType - 'standard' or 'quest' (default: 'standard')
 %
 % Output:
-%   results - struct with fields for both fitting parameterisations
+%   results - struct with AB and FixedB sub-structs and metadata
 %
 % Examples:
-%   results_std   = checkEstimationBias(50, 0.1, 'standard');
-%   results_quest = checkEstimationBias(50, 0.1, 'quest');
+%   r_std   = checkEstimationBias(50, 0.1, 'standard');
+%   r_quest = checkEstimationBias(50, 0.1, 'quest');
 %
 % History:
 %   2026-04-08  DHB, HES, ClaudeAI  wrote it.
 %   2026-04-08  DHB, HES, ClaudeAI  added fixed-b parameterisation.
 %   2026-04-08  DHB, HES, ClaudeAI  added staircaseType parameter.
+%   2026-04-08  DHB, HES, ClaudeAI  refactored to use runYesNoTSDSession.
 
 if nargin < 1;  nReps         = 50;         end
 if nargin < 2;  b_noise_sd    = 0.1;        end
 if nargin < 3;  staircaseType = 'standard'; end
 
-%% ---- True parameters (must match YesNoTSDSimulation.m) -------------------
+%% ---- Build params struct (mirrors YesNoTSDSimulation.m defaults) ---------
 
-A_true = 1.0;
-b_true = 0.8;
+params.A_true              = 1.0;
+params.b_true              = 0.8;
+params.nResp               = 6;
+params.Icrit_true          = linspace(0.3, 2, params.nResp - 1);
+params.nStaircaseRespondNo = 3;
+params.dPrimeTargets       = [0.75, 1, 1.25];
 
-nResp               = 6;
-Icrit_true          = linspace(0.3, 2, nResp-1);
-beta_true           = responseFunction(Icrit_true, [A_true, b_true]);
-nCrit               = numel(beta_true);
-nStaircaseRespondNo = 3;
-dPrimeTargets       = [0.75, 1, 1.25];
-nDPrime             = numel(dPrimeTargets);
-dPrimeRef           = 1.0;   % reference d' for I_thresh definition
+params.staircaseType = staircaseType;
+params.pCatch        = 0.20;
+params.I0            = 2.0;
+params.Imin          = 0.01;
+params.Imax          = 3.0;
 
-% True threshold intensities
+params.nUp       = 1;
+params.nDown     = 2;
+params.stepSizes = log(1.15) * [2, 1];
+
+params.questTargetProbs = [0.6, 0.75, 0.9];
+params.questBeta        = 3.5;
+params.questDelta       = 0.01;
+params.questGamma       = 0.0;
+params.questPriorSD     = 10;
+
+% Keep total signal trials equal across staircase types:
+%   standard: 1 x 150 = 150,   quest: 3 x 50 = 150
+if strcmp(staircaseType, 'standard')
+    params.nTrialsPerStaircase = 150;
+else
+    params.nTrialsPerStaircase = 50;
+end
+
+params.cMax       = 3.5;
+params.fitDisplay = 'off';   % suppress fmincon output in Monte Carlo loop
+
+%% ---- Derived true quantities ---------------------------------------------
+
+A_true    = params.A_true;
+b_true    = params.b_true;
+dPrimeTargets = params.dPrimeTargets;
+nDPrime   = numel(dPrimeTargets);
+dPrimeRef = 1.0;
+
 I_true       = (dPrimeTargets / A_true).^(1 / b_true);
 Ithresh_true = (dPrimeRef    / A_true).^(1 / b_true);
 
-%% ---- Staircase / simulation settings ------------------------------------
-
-pCatch = 0.20;
-I0     = 2.0;
-Imin   = 0.01;
-Imax   = 3.0;
-
-% Standard staircase settings
-nUp       = 1;
-nDown     = 2;
-stepSizes = log(1.15) * [2, 1];
-
-% QUEST settings — 3 interleaved QUESTs targeting different P(yes) levels
-questTargetProbs = [0.6, 0.75, 0.9];
-questBeta        = 3.5;
-questDelta       = 0.01;
-questGamma       = 0.0;
-questPriorSD     = 10;
-
-% Total signal trials kept equal across staircase types:
-%   standard: 1 staircase x 150 trials = 150
-%   quest:    3 staircases x 50 trials = 150
-if strcmp(staircaseType, 'standard')
-    nStaircases         = numel(nDown);
-    nTrialsPerStaircase = 150;
-else
-    nStaircases         = numel(questTargetProbs);
-    nTrialsPerStaircase = 50;
-end
-nTrials = nTrialsPerStaircase * nStaircases;
-
-cMax = 3.5;
-opts = optimoptions('fmincon', 'Display', 'off', ...
+nCrit  = numel(params.Icrit_true);
+cMax   = params.cMax;
+opts   = optimoptions('fmincon', 'Display', 'off', ...
     'MaxIterations', 5000, 'MaxFunctionEvaluations', 50000);
 
 %% ---- Storage -------------------------------------------------------------
 
-% AB parameterisation (both A and b free)
+% AB parameterisation (from runYesNoTSDSession)
 A_hat_all    = zeros(nReps, 1);
 b_hat_ab_all = zeros(nReps, 1);
 I_hat_ab_all = zeros(nReps, nDPrime);
 
-% Fixed-b parameterisation (b fixed at b_true + noise, I_thresh free)
-b_fixed_all      = zeros(nReps, 1);
-Ithresh_hat_all  = zeros(nReps, 1);
-I_hat_fb_all     = zeros(nReps, nDPrime);
+% Fixed-b parameterisation
+b_fixed_all     = zeros(nReps, 1);
+Ithresh_hat_all = zeros(nReps, 1);
+I_hat_fb_all    = zeros(nReps, nDPrime);
 
 %% ---- Replication loop ----------------------------------------------------
 
 fprintf('Running %d replications (staircaseType=%s, b_noise_sd=%.2f)...\n', ...
     nReps, staircaseType, b_noise_sd);
+
 for rep = 1:nReps
 
     rng(rep);
 
-    % --- Initialise staircases ---
-    staircases = cell(nStaircases, 1);
-    for s = 1:nStaircases
-        if strcmp(staircaseType, 'standard')
-            staircases{s} = Staircase('standard', log(I0), ...
-                'StepSizes', stepSizes, ...
-                'NUp',       nDown,     ...
-                'NDown',     nUp,       ...
-                'MaxValue',  log(Imax), ...
-                'MinValue',  log(Imin));
-        else
-            staircases{s} = Staircase('quest', I0, ...
-                'Beta',            questBeta,           ...
-                'Delta',           questDelta,          ...
-                'Gamma',           questGamma,          ...
-                'TargetThreshold', questTargetProbs(s), ...
-                'PriorSD',         questPriorSD,        ...
-                'MaxValue',        Imax,                ...
-                'MinValue',        Imin);
-        end
-    end
+    % --- Run one staircase session and AB fit via shared function ---
+    session = runYesNoTSDSession(params);
 
-    % --- Simulate trials ---
-    I = zeros(nTrials, 1);
-    y = zeros(nTrials, 1);
-    signalCount = 0;
+    A_hat_all(rep)      = session.A_hat;
+    b_hat_ab_all(rep)   = session.b_hat;
+    I_hat_ab_all(rep,:) = session.I_hat;
 
-    for t = 1:nTrials
-        if rand < pCatch
-            I(t) = 0;
-            y(t) = sum(randn() > beta_true) + 1;
-        else
-            signalCount = signalCount + 1;
-            s = mod(signalCount - 1, nStaircases) + 1;
-            if strcmp(staircaseType, 'standard')
-                I(t) = exp(getCurrentValue(staircases{s}));
-            else
-                I(t) = getCurrentValue(staircases{s});
-            end
-            x    = responseFunction(I(t), [A_true, b_true]) + randn();
-            y(t) = sum(x > beta_true) + 1;
-            response = double(y(t) > nStaircaseRespondNo);
-            if strcmp(staircaseType, 'standard')
-                staircases{s} = updateForTrial(staircases{s}, log(I(t)), response);
-            else
-                staircases{s} = updateForTrial(staircases{s}, I(t), response);
-            end
-        end
-    end
-
-    c_init = linspace(0.5, 3.0, nCrit);
-
-    % --- AB parameterisation ---
-    theta0_ab = [log(1); log(1); c_init(1); log(diff(c_init))'];
-    thAB      = fmincon(@(th) negLogLikAB(th, I, y), theta0_ab, ...
-        [], [], [], [], [], [], @(th) critBounds(th, cMax, 3), opts);
-
-    A_hat            = exp(thAB(1));
-    b_hat_ab         = exp(thAB(2));
-    A_hat_all(rep)   = A_hat;
-    b_hat_ab_all(rep)= b_hat_ab;
-    I_hat_ab_all(rep,:) = (dPrimeTargets / A_hat).^(1 / b_hat_ab);
-
-    % --- Fixed-b parameterisation ---
-    % b drawn from calibration distribution: b_true + noise
+    % --- Fixed-b parameterisation: b fixed, only I_thresh free ---
     b_fixed          = b_true + b_noise_sd * randn();
     b_fixed_all(rep) = b_fixed;
 
+    c_init    = linspace(0.5, 3.0, nCrit);
     theta0_fb = [log(Ithresh_true); c_init(1); log(diff(c_init))'];
-    thFB      = fmincon(@(th) negLogLikFixedB(th, I, y, b_fixed, dPrimeRef), theta0_fb, ...
-        [], [], [], [], [], [], @(th) critBounds(th, cMax, 2), opts);
 
-    Ithresh_hat            = exp(thFB(1));
-    Ithresh_hat_all(rep)   = Ithresh_hat;
-    % Invert: I = I_thresh * (d' / dPrimeRef)^(1/b_fixed)
-    I_hat_fb_all(rep,:)    = Ithresh_hat .* (dPrimeTargets / dPrimeRef).^(1 / b_fixed);
+    thFB = fmincon(@(th) negLogLikFixedB(th, session.I, session.y, b_fixed, dPrimeRef), ...
+        theta0_fb, [], [], [], [], [], [], @(th) critBoundsFixedB(th, cMax), opts);
+
+    Ithresh_hat          = exp(thFB(1));
+    Ithresh_hat_all(rep) = Ithresh_hat;
+    I_hat_fb_all(rep,:)  = Ithresh_hat .* (dPrimeTargets / dPrimeRef).^(1 / b_fixed);
 
     fprintf('  Rep %3d/%d:  AB: A=%.3f b=%.3f  |  Fixed-b: b_used=%.3f Ith=%.3f\n', ...
-        rep, nReps, A_hat, b_hat_ab, b_fixed, Ithresh_hat);
+        rep, nReps, session.A_hat, session.b_hat, b_fixed, Ithresh_hat);
 end
 
 %% ---- Summary tables ------------------------------------------------------
 
-fprintf('\n=== AB parameterisation — scale parameters (%d reps) ===\n', nReps);
+fprintf('\n=== AB parameterisation (%d reps) ===\n', nReps);
 fprintf('Param   True    Mean     Bias    SD\n');
 fprintf('--------------------------------------\n');
 fprintf('A       %.3f   %.3f    %+.3f   %.3f\n', ...
@@ -198,7 +142,7 @@ fprintf('A       %.3f   %.3f    %+.3f   %.3f\n', ...
 fprintf('b       %.3f   %.3f    %+.3f   %.3f\n', ...
     b_true, mean(b_hat_ab_all), mean(b_hat_ab_all) - b_true, std(b_hat_ab_all));
 
-fprintf('\n=== Fixed-b parameterisation — scale parameters (%d reps) ===\n', nReps);
+fprintf('\n=== Fixed-b parameterisation (%d reps) ===\n', nReps);
 fprintf('Param      True    Mean     Bias    SD\n');
 fprintf('-----------------------------------------\n');
 fprintf('b (fixed)  %.3f   %.3f    %+.3f   %.3f\n', ...
@@ -207,36 +151,32 @@ fprintf('I_thresh   %.3f   %.3f    %+.3f   %.3f\n', ...
     Ithresh_true, mean(Ithresh_hat_all), mean(Ithresh_hat_all) - Ithresh_true, std(Ithresh_hat_all));
 
 fprintf('\n=== Threshold intensity estimates ===\n');
-hdr = '  %-13s  %7s  %8s  %8s  %6s  %8s  %8s  %6s\n';
-sep = repmat('-', 1, 72);
+hdr = '  %-14s  %7s  %8s  %8s  %6s  %8s  %8s  %6s\n';
+sep = repmat('-', 1, 74);
 fprintf(hdr, '', 'I_true', 'AB mean', 'AB bias', 'AB SD', 'FB mean', 'FB bias', 'FB SD');
 fprintf('  %s\n', sep);
 for k = 1:nDPrime
-    fprintf('  d''=%.2f  (I)    %7.3f  %8.3f  %8+.3f  %6.3f  %8.3f  %8+.3f  %6.3f\n', ...
+    fprintf('  d''=%.2f  (I)     %7.3f  %8.3f  %8+.3f  %6.3f  %8.3f  %8+.3f  %6.3f\n', ...
         dPrimeTargets(k), I_true(k), ...
         mean(I_hat_ab_all(:,k)), mean(I_hat_ab_all(:,k)) - I_true(k), std(I_hat_ab_all(:,k)), ...
         mean(I_hat_fb_all(:,k)), mean(I_hat_fb_all(:,k)) - I_true(k), std(I_hat_fb_all(:,k)));
 end
 fprintf('  %s\n', sep);
 for k = 1:nDPrime
-    fprintf('  d''=%.2f  (logI) %7.3f  %8.3f  %8+.3f  %6.3f  %8.3f  %8+.3f  %6.3f\n', ...
+    fprintf('  d''=%.2f  (logI)  %7.3f  %8.3f  %8+.3f  %6.3f  %8.3f  %8+.3f  %6.3f\n', ...
         dPrimeTargets(k), log(I_true(k)), ...
         mean(log(I_hat_ab_all(:,k))), mean(log(I_hat_ab_all(:,k))) - log(I_true(k)), std(log(I_hat_ab_all(:,k))), ...
         mean(log(I_hat_fb_all(:,k))), mean(log(I_hat_fb_all(:,k))) - log(I_true(k)), std(log(I_hat_fb_all(:,k))));
 end
 
 %% ---- Figure --------------------------------------------------------------
-% [1,1] b_hat (AB, estimated) vs b_fixed (fixed-b, drawn from calibration)
-% [1,2] A_hat (AB) and I_thresh_hat (fixed-b) — the free scale parameters
-% [2,1] I_hat from AB param
-% [2,2] I_hat from fixed-b param
 
 colors = lines(nDPrime);
 
 figure('Color', 'w');
 tiledlayout(2, 2, 'TileSpacing', 'compact', 'Padding', 'compact');
 
-% --- [1,1] b values used ---
+% [1,1] b estimates: AB (estimated) vs fixed-b (drawn from calibration)
 nexttile;
 histogram(b_hat_ab_all, 12, 'FaceColor', [0.2 0.5 0.8], 'FaceAlpha', 0.6, ...
     'DisplayName', 'b_{hat} (AB, estimated)');
@@ -248,7 +188,7 @@ xlabel('b');
 title(sprintf('b  (true = %.2f)', b_true));
 legend('Location', 'best');
 
-% --- [1,2] Free scale parameter per method ---
+% [1,2] Free scale parameter: A_hat (AB) and I_thresh_hat (fixed-b)
 nexttile;
 histogram(A_hat_all,       12, 'FaceColor', [0.2 0.5 0.8], 'FaceAlpha', 0.6, ...
     'DisplayName', 'A_{hat} (AB)');
@@ -258,10 +198,10 @@ histogram(Ithresh_hat_all, 12, 'FaceColor', [0.9 0.4 0.1], 'FaceAlpha', 0.6, ...
 xline(A_true,       'b-', 'LineWidth', 2, 'HandleVisibility', 'off');
 xline(Ithresh_true, 'r-', 'LineWidth', 2, 'HandleVisibility', 'off');
 xlabel('Estimate');
-title(sprintf('Free scale param: A_{true}=%.2f, I_{thresh,true}=%.2f', A_true, Ithresh_true));
+title(sprintf('A_{hat} (true=%.2f)  |  I_{thresh} (true=%.2f)', A_true, Ithresh_true));
 legend('Location', 'best');
 
-% --- [2,1] I_hat from AB ---
+% [2,1] I_hat from AB parameterisation
 nexttile;
 hold on;
 for k = 1:nDPrime
@@ -274,7 +214,7 @@ xlabel('I_{hat}');
 title('AB param  (solid=true, dashed=mean)');
 legend('Location', 'northeast');
 
-% --- [2,2] I_hat from fixed-b ---
+% [2,2] I_hat from fixed-b parameterisation
 nexttile;
 hold on;
 for k = 1:nDPrime
@@ -293,9 +233,9 @@ results.AB.A_hat    = A_hat_all;
 results.AB.b_hat    = b_hat_ab_all;
 results.AB.I_hat    = I_hat_ab_all;
 
-results.FixedB.b_fixed    = b_fixed_all;
+results.FixedB.b_fixed     = b_fixed_all;
 results.FixedB.Ithresh_hat = Ithresh_hat_all;
-results.FixedB.I_hat      = I_hat_fb_all;
+results.FixedB.I_hat       = I_hat_fb_all;
 
 results.A_true        = A_true;
 results.b_true        = b_true;
@@ -309,36 +249,26 @@ results.staircaseType = staircaseType;
 end
 
 %% ======== Local functions =================================================
+% Note: the AB fitting functions live in runYesNoTSDSession.m.
+% unpackCrit, Phi, responseFunction are duplicated here as local functions
+% because MATLAB local functions are file-scoped.
 
-function [c, ceq] = critBounds(theta, cMax, critStart)
-    beta = unpackCrit(theta(critStart:end));
+function [c, ceq] = critBoundsFixedB(theta, cMax)
+    beta = unpackCrit(theta(2:end));
     c    = beta(:) - cMax;
     ceq  = [];
 end
 
-function nll = negLogLikAB(theta, I, y)
-    A    = exp(theta(1));
-    b    = exp(theta(2));
-    beta = unpackCrit(theta(3:end));
-    R    = A .* (max(I, 0) .^ b);
-    R(I == 0) = 0;
-    nll  = ratingNLL(R, y, beta);
-end
-
 function nll = negLogLikFixedB(theta, I, y, b_fixed, dPrimeRef)
-    I_thresh = exp(theta(1));
-    beta     = unpackCrit(theta(2:end));
-    R        = dPrimeRef .* (max(I, 0) ./ I_thresh) .^ b_fixed;
+    I_thresh  = exp(theta(1));
+    beta      = unpackCrit(theta(2:end));
+    R         = dPrimeRef .* (max(I, 0) ./ I_thresh) .^ b_fixed;
     R(I == 0) = 0;
-    nll      = ratingNLL(R, y, beta);
-end
-
-function nll = ratingNLL(R, y, beta)
-    bounds = [-Inf, beta, Inf];
-    lo     = bounds(y);
-    hi     = bounds(y + 1);
-    p      = max(Phi(hi(:) - R) - Phi(lo(:) - R), realmin);
-    nll    = -sum(log(p));
+    bounds    = [-Inf, beta, Inf];
+    lo        = bounds(y);
+    hi        = bounds(y + 1);
+    p         = max(Phi(hi(:) - R) - Phi(lo(:) - R), realmin);
+    nll       = -sum(log(p));
     if ~isfinite(nll);  nll = realmax;  end
 end
 
@@ -352,8 +282,4 @@ end
 
 function p = Phi(z)
     p = 0.5 * erfc(-z ./ sqrt(2));
-end
-
-function R = responseFunction(I, theta)
-    R = theta(1) .* (I .^ theta(2));
 end
