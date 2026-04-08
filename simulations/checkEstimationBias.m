@@ -153,14 +153,14 @@ nexttile;
 colors = lines(nDPrime);
 hold on;
 for k = 1:nDPrime
-    histogram(I_hat_all(:,k), 10, 'FaceColor', colors(k,:), 'FaceAlpha', 0.5);
-    xline(I_true(k), '-',  'Color', colors(k,:), 'LineWidth', 2);
-    xline(mean(I_hat_all(:,k)), '--', 'Color', colors(k,:), 'LineWidth', 1.5);
+    histogram(I_hat_all(:,k), 10, 'FaceColor', colors(k,:), 'FaceAlpha', 0.5, ...
+        'DisplayName', sprintf("d'=%.2f", dPrimeTargets(k)));
+    xline(I_true(k),            '-',  'Color', colors(k,:), 'LineWidth', 2,   'HandleVisibility', 'off');
+    xline(mean(I_hat_all(:,k)), '--', 'Color', colors(k,:), 'LineWidth', 1.5, 'HandleVisibility', 'off');
 end
 xlabel('I_{hat}');
 title('Threshold estimates  (solid=true, dashed=mean)');
-legend(arrayfun(@(d) sprintf("d'=%.2f", d), dPrimeTargets, 'UniformOutput', false), ...
-    'Location', 'northeast');
+legend('Location', 'northeast');
 
 %% ---- Pack results --------------------------------------------------------
 
