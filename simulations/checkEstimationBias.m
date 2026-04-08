@@ -135,7 +135,7 @@ end
 %% ---- Figure --------------------------------------------------------------
 
 figure('Color', 'w');
-tiledlayout(1, 3);
+tiledlayout(2, 2);
 
 nexttile;
 histogram(A_hat_all, 12); hold on;
@@ -149,7 +149,7 @@ xline(b_true, 'r-', 'LineWidth', 2);
 xline(mean(b_hat_all), 'b--', 'LineWidth', 1.5);
 xlabel('b_{hat}');  title(sprintf('b  (true=%.2f, mean=%.2f)', b_true, mean(b_hat_all)));
 
-nexttile;
+nexttile([1 2]);   % span both columns in the second row
 colors = lines(nDPrime);
 hold on;
 for k = 1:nDPrime
