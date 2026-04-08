@@ -1,39 +1,38 @@
-function results = checkEstimationBias(nReps, b_noise_sd)
-% results = checkEstimationBias(nReps, b_noise_sd)
+function results = checkEstimationBias(nReps, b_noise_sd, staircaseType)
+% results = checkEstimationBias(nReps, b_noise_sd, staircaseType)
 %
 % Runs the YesNoTSD staircase simulation and MLE fitting nReps times,
-% comparing two parameterisations:
+% comparing two fitting parameterisations:
 %
-%   AB param   : theta = [log(A), log(b), criteria...]
-%                R(I) = A * I^b   (both parameters free)
+%   AB param      : R(I) = A * I^b   (both A and b free)
+%   Fixed-b param : R(I) = (I/I_thresh)^b_fixed
+%                   b fixed at b_true + N(0, b_noise_sd); only I_thresh free.
 %
-%   Fixed-b param : theta = [log(I_thresh), criteria...]
-%                R(I) = (I / I_thresh)^b_fixed
-%                b is fixed at b_true + N(0, b_noise_sd), simulating a
-%                calibration estimate. I_thresh is the one free scale
-%                parameter, anchored where staircase data concentrates.
-%
-% Note: a pure threshold reparameterisation (A,b) -> (I_thresh,b) is
-% mathematically identical to the AB param and gives the same results.
-% The fixed-b version genuinely reduces the problem to one free scale
-% parameter, which is why it is expected to show less bias/variance.
+% Staircase type is controlled by staircaseType:
+%   'standard' : 1-up/2-down staircase in log(I) space (default)
+%   'quest'    : 3 interleaved QUESTs targeting P(yes) = [0.6, 0.75, 0.9]
+%                for broader intensity coverage
 %
 % Inputs:
-%   nReps      - number of simulation replications (default: 50)
-%   b_noise_sd - SD of calibration error on b (default: 0.1)
+%   nReps         - number of replications (default: 50)
+%   b_noise_sd    - SD of calibration error on b (default: 0.1)
+%   staircaseType - 'standard' or 'quest' (default: 'standard')
 %
 % Output:
-%   results - struct with fields for both parameterisations
+%   results - struct with fields for both fitting parameterisations
 %
-% Example:
-%   results = checkEstimationBias(50, 0.1);
+% Examples:
+%   results_std   = checkEstimationBias(50, 0.1, 'standard');
+%   results_quest = checkEstimationBias(50, 0.1, 'quest');
 %
 % History:
 %   2026-04-08  DHB, HES, ClaudeAI  wrote it.
 %   2026-04-08  DHB, HES, ClaudeAI  added fixed-b parameterisation.
+%   2026-04-08  DHB, HES, ClaudeAI  added staircaseType parameter.
 
-if nargin < 1;  nReps      = 50;   end
-if nargin < 2;  b_noise_sd = 0.1;  end
+if nargin < 1;  nReps         = 50;         end
+if nargin < 2;  b_noise_sd    = 0.1;        end
+if nargin < 3;  staircaseType = 'standard'; end
 
 %% ---- True parameters (must match YesNoTSDSimulation.m) -------------------
 
@@ -55,16 +54,34 @@ Ithresh_true = (dPrimeRef    / A_true).^(1 / b_true);
 
 %% ---- Staircase / simulation settings ------------------------------------
 
-pCatch              = 0.20;
-nUp                 = 1;
-nDown               = 2;
-nStaircases         = 1;
-nTrialsPerStaircase = 150;
-nTrials             = nTrialsPerStaircase * nStaircases;
-I0                  = 2.0;
-Imin                = 0.01;
-Imax                = 3.0;
-stepSizes           = log(1.15) * [2, 1];
+pCatch = 0.20;
+I0     = 2.0;
+Imin   = 0.01;
+Imax   = 3.0;
+
+% Standard staircase settings
+nUp       = 1;
+nDown     = 2;
+stepSizes = log(1.15) * [2, 1];
+
+% QUEST settings — 3 interleaved QUESTs targeting different P(yes) levels
+questTargetProbs = [0.6, 0.75, 0.9];
+questBeta        = 3.5;
+questDelta       = 0.01;
+questGamma       = 0.0;
+questPriorSD     = 10;
+
+% Total signal trials kept equal across staircase types:
+%   standard: 1 staircase x 150 trials = 150
+%   quest:    3 staircases x 50 trials = 150
+if strcmp(staircaseType, 'standard')
+    nStaircases         = numel(nDown);
+    nTrialsPerStaircase = 150;
+else
+    nStaircases         = numel(questTargetProbs);
+    nTrialsPerStaircase = 50;
+end
+nTrials = nTrialsPerStaircase * nStaircases;
 
 cMax = 3.5;
 opts = optimoptions('fmincon', 'Display', 'off', ...
@@ -84,31 +101,59 @@ I_hat_fb_all     = zeros(nReps, nDPrime);
 
 %% ---- Replication loop ----------------------------------------------------
 
-fprintf('Running %d replications (b_noise_sd = %.2f)...\n', nReps, b_noise_sd);
+fprintf('Running %d replications (staircaseType=%s, b_noise_sd=%.2f)...\n', ...
+    nReps, staircaseType, b_noise_sd);
 for rep = 1:nReps
 
     rng(rep);
 
-    % --- Staircase simulation ---
-    sc = Staircase('standard', log(I0), ...
-        'StepSizes', stepSizes, ...
-        'NUp',       nDown, ...
-        'NDown',     nUp,   ...
-        'MaxValue',  log(Imax), ...
-        'MinValue',  log(Imin));
+    % --- Initialise staircases ---
+    staircases = cell(nStaircases, 1);
+    for s = 1:nStaircases
+        if strcmp(staircaseType, 'standard')
+            staircases{s} = Staircase('standard', log(I0), ...
+                'StepSizes', stepSizes, ...
+                'NUp',       nDown,     ...
+                'NDown',     nUp,       ...
+                'MaxValue',  log(Imax), ...
+                'MinValue',  log(Imin));
+        else
+            staircases{s} = Staircase('quest', I0, ...
+                'Beta',            questBeta,           ...
+                'Delta',           questDelta,          ...
+                'Gamma',           questGamma,          ...
+                'TargetThreshold', questTargetProbs(s), ...
+                'PriorSD',         questPriorSD,        ...
+                'MaxValue',        Imax,                ...
+                'MinValue',        Imin);
+        end
+    end
 
+    % --- Simulate trials ---
     I = zeros(nTrials, 1);
     y = zeros(nTrials, 1);
+    signalCount = 0;
 
     for t = 1:nTrials
         if rand < pCatch
             I(t) = 0;
             y(t) = sum(randn() > beta_true) + 1;
         else
-            I(t) = exp(getCurrentValue(sc));
+            signalCount = signalCount + 1;
+            s = mod(signalCount - 1, nStaircases) + 1;
+            if strcmp(staircaseType, 'standard')
+                I(t) = exp(getCurrentValue(staircases{s}));
+            else
+                I(t) = getCurrentValue(staircases{s});
+            end
             x    = responseFunction(I(t), [A_true, b_true]) + randn();
             y(t) = sum(x > beta_true) + 1;
-            sc   = updateForTrial(sc, log(I(t)), double(y(t) > nStaircaseRespondNo));
+            response = double(y(t) > nStaircaseRespondNo);
+            if strcmp(staircaseType, 'standard')
+                staircases{s} = updateForTrial(staircases{s}, log(I(t)), response);
+            else
+                staircases{s} = updateForTrial(staircases{s}, I(t), response);
+            end
         end
     end
 
@@ -259,6 +304,7 @@ results.I_true        = I_true;
 results.dPrimeTargets = dPrimeTargets;
 results.dPrimeRef     = dPrimeRef;
 results.b_noise_sd    = b_noise_sd;
+results.staircaseType = staircaseType;
 
 end
 
