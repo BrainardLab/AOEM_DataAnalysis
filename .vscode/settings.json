@@ -1,0 +1,29 @@
+{
+    // Path to your MATLAB installation — update this to match your machine
+    // e.g. "/Applications/MATLAB_R2024b.app"
+    "matlab.installPath": "/Applications/MATLAB_R2024a.app",
+
+    // Associate .m files with MATLAB language mode
+    "files.associations": {
+        "*.m": "matlab"
+    },
+
+    // Editor comfort settings for MATLAB
+    "editor.tabSize": 4,
+    "editor.insertSpaces": true,
+    "editor.rulers": [80],
+    "editor.trimAutoWhitespace": true,
+
+    // Show whitespace to help with indentation
+    "editor.renderWhitespace": "boundary",
+
+    // Exclude MATLAB-generated clutter from the file explorer
+    "files.exclude": {
+        "**/*.asv": true,
+        "**/*.mex*": true,
+        "**/slprj": true
+    },
+
+    // Tell Git to ignore .asv (auto-save) files
+    "git.ignoredRepositories": []
+}

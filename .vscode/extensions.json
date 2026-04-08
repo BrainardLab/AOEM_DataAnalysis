@@ -1,0 +1,14 @@
+{
+    // Recommended extensions for this project.
+    // VS Code will prompt collaborators to install these when they open the folder.
+    "recommendations": [
+        // MATLAB language support (official MathWorks extension)
+        "mathworks.language-matlab",
+
+        // Git history and blame annotations
+        "mhutchie.git-graph",
+
+        // Nicer diff viewer
+        "eamodio.gitlens"
+    ]
+}
