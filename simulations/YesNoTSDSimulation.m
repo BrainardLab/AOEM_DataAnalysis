@@ -35,6 +35,14 @@
 %   verify the estimates via two d-prime recovery methods:
 %   (1) AUC of the empirical rating ROC, and
 %   (2) MLE of d-prime with criteria treated as nuisance parameters.
+%
+% REQUIRES
+%   Uses staircase functions from BrainardLabToolbox, and probably relies
+%   on Psychtoolbox as well.  If you use the ToolboxToolbox, the following
+%   command is sufficient (select and run):
+%{
+    tbUse('BrainardLabBase'); 
+%}
 
 % History:
 %   2026-04-08 - DHB, HES, ClaudeAI - wrote it.
@@ -45,12 +53,12 @@ clear; clc; close all;
 %% ---- True (simulation) parameters ----------------------------------------
 
 A_true = 1.0;    % response-function gain
-b_true = 1;      % response-function exponent  (R = A * I^b)
+b_true = 0.8;      % response-function exponent  (R = A * I^b)
 
 % Decision criteria specified in intensity space; converted to response
 % (d-prime) space via the response function.
 nResp      = 6;
-Icrit_true = linspace(0.5, 2, nResp-1);                          % 5 values
+Icrit_true = linspace(0.3, 2, nResp-1);                          % 5 values
 beta_true  = responseFunction(Icrit_true, [A_true, b_true]);     % in R space
 nCrit      = numel(beta_true);
 
@@ -62,7 +70,6 @@ nStaircaseRespondNo = 3;
 dPrimeTargets = [0.75, 1, 1.25];
 
 %% ---- Staircase and simulation settings ------------------------------------
-
 pCatch = 0.20;   % fraction of trials with I = 0 (catch / noise-only trials)
 
 % Each staircase is defined by its (nUp, nDown) rule:
@@ -72,10 +79,12 @@ pCatch = 0.20;   % fraction of trials with I = 0 (catch / noise-only trials)
 %   Staircase 'NUp'   = nDown(s)  (correct responses needed to step down)
 %   Staircase 'NDown' = nUp(s)    (incorrect responses needed to step up)
 % The length of nDown implicitly defines nStaircases.
-nUp   = [2, 1, 1, 1];
-nDown = [1, 1, 2, 3];
+nUp   = [2, 1, 1];
+nDown = [1, 1, 2];
+nUp = 1;
+nDown = 2;
 nStaircases         = numel(nDown);
-nTrialsPerStaircase = 50;
+nTrialsPerStaircase = 150;
 nTrials             = nTrialsPerStaircase * nStaircases;
 
 I0         = 2.0;    % starting intensity for all staircases
