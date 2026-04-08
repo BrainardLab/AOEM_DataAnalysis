@@ -72,38 +72,68 @@ dPrimeTargets = [0.75, 1, 1.25];
 %% ---- Staircase and simulation settings ------------------------------------
 pCatch = 0.20;   % fraction of trials with I = 0 (catch / noise-only trials)
 
-% Each staircase is defined by its (nUp, nDown) rule:
-%   nUp(s)   = number of INCORRECT responses required to step intensity UP
-%   nDown(s) = number of CORRECT  responses required to step intensity DOWN
-% Mapping to BrainardLabToolbox Staircase convention:
-%   Staircase 'NUp'   = nDown(s)  (correct responses needed to step down)
-%   Staircase 'NDown' = nUp(s)    (incorrect responses needed to step up)
-% The length of nDown implicitly defines nStaircases.
-nUp   = [2, 1, 1];
-nDown = [1, 1, 2];
-nUp = 1;
-nDown = 2;
-nStaircases         = numel(nDown);
-nTrialsPerStaircase = 150;
-nTrials             = nTrialsPerStaircase * nStaircases;
+% Staircase type: 'standard' or 'quest'
+staircaseType = 'standard';
 
-I0         = 2.0;    % starting intensity for all staircases
-Imin       = 0.01;   % hard lower bound on intensity
-Imax       = 3.0;    % hard upper bound on intensity
+I0   = 2.0;    % starting intensity for all staircases
+Imin = 0.01;   % hard lower bound on intensity
+Imax = 3.0;    % hard upper bound on intensity
+
+% --- Standard staircase settings (used when staircaseType = 'standard') ---
+% nUp(s)/nDown(s): incorrect/correct responses needed to step up/down.
+% The length of nDown implicitly defines nStaircases.
+nUp   = 1;
+nDown = 2;
+
 stepFactor = 1.15;   % multiplicative step size in intensity space
 % Staircases operate in log(I) space; additive steps here = multiplicative in I.
 stepSizes  = log(stepFactor) * [2, 1];   % two step sizes, shrinking after reversals
+
+% --- QUEST settings (used when staircaseType = 'quest') ---
+% questTargetProbs: target P(yes) for each interleaved QUEST.
+% Multiple values => multiple interleaved QUESTs converging to different
+% intensity levels, giving broader coverage of the psychometric function.
+questTargetProbs = [0.6, 0.75, 0.9];   % one QUEST per entry
+questBeta        = 3.5;    % Weibull slope (approximate for power-law SDT)
+questDelta       = 0.01;   % lapse rate
+questGamma       = 0.0;    % guess rate (0 for yes/no detection)
+questPriorSD     = 10;     % log10(questPriorSD) = prior SD in log10(I) units
+                            % (10 => 1 log10 unit of prior uncertainty)
+
+% --- Derive nStaircases from the chosen type ---
+if strcmp(staircaseType, 'standard')
+    nStaircases = numel(nDown);
+else
+    nStaircases = numel(questTargetProbs);
+end
+
+nTrialsPerStaircase = 150;
+nTrials             = nTrialsPerStaircase * nStaircases;
 
 %% ---- Initialise staircases ------------------------------------------------
 
 staircases = cell(nStaircases, 1);
 for s = 1:nStaircases
-    staircases{s} = Staircase('standard', log(I0), ...
-        'StepSizes', stepSizes, ...
-        'NUp',       nDown(s), ...   % correct responses to step down
-        'NDown',     nUp(s),   ...   % incorrect responses to step up
-        'MaxValue',  log(Imax), ...
-        'MinValue',  log(Imin));
+    if strcmp(staircaseType, 'standard')
+        % Standard staircase operates in log(I) space internally.
+        staircases{s} = Staircase('standard', log(I0), ...
+            'StepSizes', stepSizes, ...
+            'NUp',       nDown(s), ...   % correct responses to step down
+            'NDown',     nUp(s),   ...   % incorrect responses to step up
+            'MaxValue',  log(Imax), ...
+            'MinValue',  log(Imin));
+    else
+        % QUEST handles log10(I) conversion internally;
+        % getCurrentValue returns linear I, updateForTrial takes linear I.
+        staircases{s} = Staircase('quest', I0, ...
+            'Beta',            questBeta,           ...
+            'Delta',           questDelta,          ...
+            'Gamma',           questGamma,          ...
+            'TargetThreshold', questTargetProbs(s), ...
+            'PriorSD',         questPriorSD,        ...
+            'MaxValue',        Imax,                ...
+            'MinValue',        Imin);
+    end
 end
 
 %% ---- Simulate trial sequence ----------------------------------------------
@@ -127,15 +157,23 @@ for t = 1:nTrials
         signalCount = signalCount + 1;
         s           = mod(signalCount - 1, nStaircases) + 1;
         sIdx(t)     = s;
-        I(t)        = exp(getCurrentValue(staircases{s}));
+        if strcmp(staircaseType, 'standard')
+            I(t) = exp(getCurrentValue(staircases{s}));
+        else
+            I(t) = getCurrentValue(staircases{s});
+        end
 
         % Sample noisy internal response and assign rating.
         x    = responseFunction(I(t), [A_true, b_true]) + randn();
         y(t) = sum(x > beta_true) + 1;
 
         % Update staircase.  Response = 1 ("yes") iff rating exceeds threshold.
-        response      = double(y(t) > nStaircaseRespondNo);
-        staircases{s} = updateForTrial(staircases{s}, log(I(t)), response);
+        response = double(y(t) > nStaircaseRespondNo);
+        if strcmp(staircaseType, 'standard')
+            staircases{s} = updateForTrial(staircases{s}, log(I(t)), response);
+        else
+            staircases{s} = updateForTrial(staircases{s}, I(t), response);
+        end
     end
 
     % Catch trials also get a rating (used in MLE fitting and ROC analysis).
@@ -238,8 +276,13 @@ lgdHandles(nStaircases+1) = plot(nan, nan, 'ko', 'MarkerFaceColor', 'k', 'Marker
 lgdHandles(nStaircases+2) = plot(nan, nan, 'kx', 'MarkerSize', 10, 'LineWidth', 1.5);
 xlabel('Trial');  ylabel('Intensity');  ylim([0, Imax]);
 title('Interleaved staircase trajectories');
-lgdLabels = [arrayfun(@(u,d) sprintf('%d-up %d-down', u, d), nUp, nDown, 'UniformOutput', false), ...
-             {'Correct', 'Incorrect'}];
+if strcmp(staircaseType, 'standard')
+    lgdLabels = [arrayfun(@(u,d) sprintf('%d-up %d-down', u, d), nUp.*ones(1,nStaircases), nDown.*ones(1,nStaircases), 'UniformOutput', false), ...
+                 {'Correct', 'Incorrect'}];
+else
+    lgdLabels = [arrayfun(@(p) sprintf('QUEST P=%.2f', p), questTargetProbs, 'UniformOutput', false), ...
+                 {'Correct', 'Incorrect'}];
+end
 legend(lgdHandles, lgdLabels, 'Location', 'northeastoutside');
 
 % --- Panel 2: intensity response function R = A*I^b ---
