@@ -328,6 +328,8 @@ for k = 1:nDPrime
         'Location', 'southeast');
 end
 
+end % YesNoTSDSimulation
+
 %% ======== Local functions (fixed-intensity ROC only) ======================
 % Note: the AB fitting functions live in runYesNoTSDSession.m.
 % unpackCrit, Phi, responseFunction are duplicated here as local functions
@@ -366,5 +368,3 @@ end
 function R = responseFunction(I, theta)
     R = theta(1) .* (I .^ theta(2));
 end
-
-end % YesNoTSDSimulation
