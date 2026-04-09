@@ -1,8 +1,12 @@
-% YesNoTSDSimulation.m
+function YesNoTSDSimulation(staircaseType)
+% YesNoTSDSimulation(staircaseType)
 %
 % End-to-end simulation of a rating-scale detection experiment using
 % signal detection theory (SDT), followed by maximum-likelihood fitting
 % and threshold estimation.
+%
+% Input:
+%   staircaseType - 'standard' (default) or 'quest'
 %
 % GENERATIVE MODEL
 %   Internal response on a trial with stimulus intensity I:
@@ -49,7 +53,9 @@
 %   2026-04-08 - DHB, HES, ClaudeAI - refactored: simulation and AB fit
 %                moved to runYesNoTSDSession.m.
 
-clear; clc; close all;
+if nargin < 1;  staircaseType = 'standard';  end
+
+clc; close all;
 %rng(1);   % uncomment for reproducible runs
 
 %% ---- Parameters ----------------------------------------------------------
@@ -62,9 +68,8 @@ params.Icrit_true          = linspace(0.3, 2, params.nResp - 1);
 params.nStaircaseRespondNo = 3;
 params.dPrimeTargets       = [0.75, 1, 1.25];
 
-% Staircase type: 'standard' or 'quest'
-% params.staircaseType = 'standard';
-params.staircaseType = 'quest';
+% Staircase type: 'standard' or 'quest' (passed in as argument)
+params.staircaseType = staircaseType;
 
 % Common staircase settings
 params.pCatch = 0.20;
