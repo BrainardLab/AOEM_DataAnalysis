@@ -37,10 +37,17 @@
 %   (2) MLE of d-prime with criteria treated as nuisance parameters.
 %
 % REQUIRES
-%   Uses staircase functions from BrainardLabToolbox.  If you use the
-%   ToolboxToolbox, the following command is sufficient (select and run):
+%   BrainardLabToolbox (for Staircase class).  The 'quest' staircaseType also
+%   requires Psychtoolbox-3 (for QuestCreate).  If you use ToolboxToolbox,
+%   run the following before running this script (select and run):
 %{
+    % Standard staircase only:
     tbUse('BrainardLabToolbox');
+
+    % QUEST staircase (must load both together; run 'clear classes' first if
+    % you previously loaded BrainardLabToolbox alone in this session):
+    clear classes
+    tbUse({'BrainardLabToolbox', 'Psychtoolbox-3'});
 %}
 
 % History:
@@ -63,18 +70,22 @@ params.dPrimeTargets       = [0.75, 1, 1.25];
 
 % Staircase type: 'standard' or 'quest'
 params.staircaseType = 'standard';
+% params.staircaseType = 'quest';
 
 % Common staircase settings
-params.pCatch              = 0.20;
-params.I0                  = 2.0;
-params.Imin                = 0.01;
-params.Imax                = 3.0;
-params.nTrialsPerStaircase = 150;
+params.pCatch = 0.20;
+params.I0     = 2.0;
+params.Imin   = 0.01;
+params.Imax   = 3.0;
 
-% Standard staircase: nUp/nDown rules (scalar or vector; length => nStaircases)
-params.nUp        = 1;
-params.nDown      = 2;
-params.stepSizes  = log(1.15) * [2, 1];
+% Standard staircase: 3 interleaved staircases with nDown=[2,5,9].
+% Convergence probabilities P ≈ [0.618, 0.755, 0.822] (from P^nDown = (1-P)^nUp),
+% chosen to approximately match QUEST targets [0.6, 0.75, 0.9].
+% Total trials = 50 per staircase x 3 = 150 (same as 3-QUEST design).
+params.nUp                 = [1, 1, 1];
+params.nDown               = [2, 5, 9];
+params.stepSizes           = log(1.15) * [2, 1];
+params.nTrialsPerStaircase = 50;
 
 % QUEST settings (used when staircaseType = 'quest')
 % questTargetProbs: one QUEST per entry, each targeting a different P(yes).

@@ -9,7 +9,7 @@ function results = checkEstimationBias(nReps, b_noise_sd, staircaseType)
 %                 where R(I) = (I/I_thresh)^b_fixed.
 %
 % Staircase type is shared with YesNoTSDSimulation.m:
-%   'standard' : 1-up/2-down, 1 staircase x 150 trials  (default)
+%   'standard' : 3 interleaved staircases (nDown=[2,5,9]) x 50 trials = 150 total
 %   'quest'    : 3 interleaved QUESTs x 50 trials = 150 total
 %
 % Inputs:
@@ -23,6 +23,11 @@ function results = checkEstimationBias(nReps, b_noise_sd, staircaseType)
 % Examples:
 %   r_std   = checkEstimationBias(50, 0.1, 'standard');
 %   r_quest = checkEstimationBias(50, 0.1, 'quest');
+%
+% Requires:
+%   BrainardLabToolbox (Staircase class).  'quest' also requires Psychtoolbox-3.
+%   Load both together to avoid 'clear classes' errors:
+%     clear classes; tbUse({'BrainardLabToolbox', 'Psychtoolbox-3'});
 %
 % History:
 %   2026-04-08  DHB, HES, ClaudeAI  wrote it.
@@ -49,8 +54,12 @@ params.I0            = 2.0;
 params.Imin          = 0.01;
 params.Imax          = 3.0;
 
-params.nUp       = 1;
-params.nDown     = 2;
+% Standard staircase: 3 interleaved staircases with nDown=[2,5,9].
+% Convergence probabilities: P^nDown = (1-P)^nUp gives P ≈ [0.618, 0.755, 0.822],
+% chosen to approximately match the QUEST targets [0.6, 0.75, 0.9].
+% (Exactly matching 0.9 would require nDown≈22, which is impractical.)
+params.nUp       = [1, 1, 1];
+params.nDown     = [2, 5, 9];
 params.stepSizes = log(1.15) * [2, 1];
 
 params.questTargetProbs = [0.6, 0.75, 0.9];
@@ -59,13 +68,14 @@ params.questDelta       = 0.01;
 params.questGamma       = 0.0;
 params.questPriorSD     = 10;
 
-% Keep total signal trials equal across staircase types:
-%   standard: 1 x 150 = 150,   quest: 3 x 50 = 150
+% Total signal trials fixed at 150, divided evenly across staircases.
+%   standard: 3 x 50 = 150,   quest: 3 x 50 = 150
 if strcmp(staircaseType, 'standard')
-    params.nTrialsPerStaircase = 150;
+    nSC = numel(params.nDown);
 else
-    params.nTrialsPerStaircase = 50;
+    nSC = numel(params.questTargetProbs);
 end
+params.nTrialsPerStaircase = 150 / nSC;
 
 params.cMax       = 3.5;
 params.fitDisplay = 'off';   % suppress fmincon output in Monte Carlo loop
