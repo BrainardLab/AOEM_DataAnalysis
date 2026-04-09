@@ -366,3 +366,5 @@ end
 function R = responseFunction(I, theta)
     R = theta(1) .* (I .^ theta(2));
 end
+
+end % YesNoTSDSimulation
