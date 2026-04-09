@@ -202,37 +202,41 @@ fprintf('b (fixed)  %.3f   %.3f    %+.3f   %.3f\n', ...
 fprintf('I_thresh   %.3f   %.3f    %+.3f   %.3f\n', ...
     Ithresh_true, mean(Ithresh_hat_all), mean(Ithresh_hat_all) - Ithresh_true, std(Ithresh_hat_all));
 
-fprintf('\n=== Threshold intensity estimates ===\n');
-hdr  = '  %-14s  %7s  %8s  %8s  %6s  %8s  %8s  %6s\n';
-dfmt = '  %-14s  %7.3f  %8.3f  %8+.3f  %6.3f  %8.3f  %8+.3f  %6.3f\n';
-sep  = repmat('-', 1, 74);
-fprintf(hdr, '', 'I_true', 'AB mean', 'AB bias', 'AB SD', 'FB mean', 'FB bias', 'FB SD');
-fprintf('  %s\n', sep);
+thdr = '  %-10s  %8s  %9s  %9s  %7s  %9s  %9s  %7s\n';
+tdat = '  %-10s  %8.3f  %9.3f  %9+.3f  %7.3f  %9.3f  %9+.3f  %7.3f\n';
+tsep = repmat('-', 1, 78);
+
+fprintf('\n=== Threshold intensity estimates (I) ===\n');
+fprintf(thdr, "d' target", 'I_true', 'AB mean', 'AB bias', 'AB SD', 'FB mean', 'FB bias', 'FB SD');
+fprintf('  %s\n', tsep);
 for k = 1:nDPrime
-    fprintf(dfmt, sprintf("d'=%.2f (I)", dPrimeTargets(k)), I_true(k), ...
+    fprintf(tdat, sprintf("d'=%.2f", dPrimeTargets(k)), I_true(k), ...
         mean(I_hat_ab_all(:,k)), mean(I_hat_ab_all(:,k)) - I_true(k), std(I_hat_ab_all(:,k)), ...
         mean(I_hat_fb_all(:,k)), mean(I_hat_fb_all(:,k)) - I_true(k), std(I_hat_fb_all(:,k)));
 end
-fprintf('  %s\n', sep);
+
+fprintf('\n=== Threshold intensity estimates (log I) ===\n');
+fprintf(thdr, "d' target", 'logI_true', 'AB mean', 'AB bias', 'AB SD', 'FB mean', 'FB bias', 'FB SD');
+fprintf('  %s\n', tsep);
 for k = 1:nDPrime
-    fprintf(dfmt, sprintf("d'=%.2f (logI)", dPrimeTargets(k)), log(I_true(k)), ...
+    fprintf(tdat, sprintf("d'=%.2f", dPrimeTargets(k)), log(I_true(k)), ...
         mean(log(I_hat_ab_all(:,k))), mean(log(I_hat_ab_all(:,k))) - log(I_true(k)), std(log(I_hat_ab_all(:,k))), ...
         mean(log(I_hat_fb_all(:,k))), mean(log(I_hat_fb_all(:,k))) - log(I_true(k)), std(log(I_hat_fb_all(:,k))));
 end
 
 fprintf('\n=== Fixed-intensity ROC validation — AB param (%d signal + %d catch per rep) ===\n', ...
     nFixedSignal, nFixedCatch);
-hdr2  = '  %-14s  %8s  %8s  %6s  %8s  %8s  %6s\n';
-dfmt2 = '  %-14s  %8.3f  %8+.3f  %6.3f  %8.3f  %8+.3f  %6.3f\n';
-sep2  = repmat('-', 1, 66);
-fprintf(hdr2, '', 'AUC mean', 'AUC bias', 'AUC SD', 'MLE mean', 'MLE bias', 'MLE SD');
-fprintf('  %s\n', sep2);
+rhdr = '  %-10s  %9s  %9s  %7s  %9s  %9s  %7s\n';
+rdat = '  %-10s  %9.3f  %9+.3f  %7.3f  %9.3f  %9+.3f  %7.3f\n';
+rsep = repmat('-', 1, 68);
+fprintf(rhdr, "d' target", 'AUC mean', 'AUC bias', 'AUC SD', 'MLE mean', 'MLE bias', 'MLE SD');
+fprintf('  %s\n', rsep);
 for k = 1:nDPrime
-    fprintf(dfmt2, sprintf("d'=%.2f", dPrimeTargets(k)), ...
+    fprintf(rdat, sprintf("d'=%.2f", dPrimeTargets(k)), ...
         mean(d_auc_all(:,k)), mean(d_auc_all(:,k)) - dPrimeTargets(k), std(d_auc_all(:,k)), ...
         mean(d_mle_all(:,k)), mean(d_mle_all(:,k)) - dPrimeTargets(k), std(d_mle_all(:,k)));
 end
-fprintf('  %s\n', sep2);
+fprintf('  %s\n', rsep);
 
 %% ---- Figure --------------------------------------------------------------
 
