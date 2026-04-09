@@ -25,9 +25,8 @@ function results = checkEstimationBias(nReps, b_noise_sd, staircaseType)
 %   r_quest = checkEstimationBias(50, 0.1, 'quest');
 %
 % Requires:
-%   BrainardLabToolbox (Staircase class).  'quest' also requires Psychtoolbox-3.
-%   Load both together to avoid 'clear classes' errors:
-%     clear classes; tbUse({'BrainardLabToolbox', 'Psychtoolbox-3'});
+%   BrainardLabToolbox and Psychtoolbox-3.  Run initSession.m once at the
+%   start of each MATLAB session before calling this function.
 %
 % History:
 %   2026-04-08  DHB, HES, ClaudeAI  wrote it.

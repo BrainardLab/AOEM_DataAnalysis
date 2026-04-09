@@ -37,17 +37,11 @@
 %   (2) MLE of d-prime with criteria treated as nuisance parameters.
 %
 % REQUIRES
-%   BrainardLabToolbox (for Staircase class).  The 'quest' staircaseType also
-%   requires Psychtoolbox-3 (for QuestCreate).  If you use ToolboxToolbox,
-%   run the following before running this script (select and run):
+%   BrainardLabToolbox (Staircase class) and Psychtoolbox-3 (QuestCreate,
+%   needed by the 'quest' staircaseType).  Run initSession.m once at the
+%   start of each MATLAB session to load both toolboxes together:
 %{
-    % Standard staircase only:
-    tbUse('BrainardLabToolbox');
-
-    % QUEST staircase (must load both together; run 'clear classes' first if
-    % you previously loaded BrainardLabToolbox alone in this session):
-    clear classes
-    tbUse({'BrainardLabToolbox', 'Psychtoolbox-3'});
+    initSession
 %}
 
 % History:
@@ -69,8 +63,8 @@ params.nStaircaseRespondNo = 3;
 params.dPrimeTargets       = [0.75, 1, 1.25];
 
 % Staircase type: 'standard' or 'quest'
-params.staircaseType = 'standard';
-% params.staircaseType = 'quest';
+% params.staircaseType = 'standard';
+params.staircaseType = 'quest';
 
 % Common staircase settings
 params.pCatch = 0.20;
