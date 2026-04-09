@@ -79,6 +79,9 @@ params.nTrialsPerStaircase = 150 / nSC;
 params.cMax       = 3.5;
 params.fitDisplay = 'off';   % suppress fmincon output in Monte Carlo loop
 
+nFixedSignal = 150;   % signal trials per fixed-intensity validation rep
+nFixedCatch  = 75;    % catch trials per fixed-intensity validation rep
+
 %% ---- Derived true quantities ---------------------------------------------
 
 A_true    = params.A_true;
@@ -89,6 +92,7 @@ dPrimeRef = 1.0;
 
 I_true       = (dPrimeTargets / A_true).^(1 / b_true);
 Ithresh_true = (dPrimeRef    / A_true).^(1 / b_true);
+beta_true    = A_true .* (params.Icrit_true .^ b_true);
 
 nCrit  = numel(params.Icrit_true);
 cMax   = params.cMax;
@@ -106,6 +110,10 @@ I_hat_ab_all = zeros(nReps, nDPrime);
 b_fixed_all     = zeros(nReps, 1);
 Ithresh_hat_all = zeros(nReps, 1);
 I_hat_fb_all    = zeros(nReps, nDPrime);
+
+% Fixed-intensity ROC validation (AB parameterisation)
+d_auc_all = zeros(nReps, nDPrime);
+d_mle_all = zeros(nReps, nDPrime);
 
 %% ---- Replication loop ----------------------------------------------------
 
@@ -136,6 +144,41 @@ for rep = 1:nReps
     Ithresh_hat          = exp(thFB(1));
     Ithresh_hat_all(rep) = Ithresh_hat;
     I_hat_fb_all(rep,:)  = Ithresh_hat .* (dPrimeTargets / dPrimeRef).^(1 / b_fixed);
+
+    % --- Fixed-intensity ROC validation (AB parameterisation) ---
+    for k = 1:nDPrime
+        I_fixed      = I_hat_ab_all(rep, k);
+        R_true_fixed = A_true * I_fixed ^ b_true;
+
+        ySignal = zeros(nFixedSignal, 1);
+        for t = 1:nFixedSignal
+            x = R_true_fixed + randn();
+            ySignal(t) = sum(x > beta_true) + 1;
+        end
+        yCatch = zeros(nFixedCatch, 1);
+        for t = 1:nFixedCatch
+            x = randn();
+            yCatch(t) = sum(x > beta_true) + 1;
+        end
+
+        % AUC d-prime
+        FA  = [1; zeros(nCrit, 1); 0];
+        Hit = [1; zeros(nCrit, 1); 0];
+        for j = 1:nCrit
+            FA(j+1)  = mean(yCatch  > j);
+            Hit(j+1) = mean(ySignal > j);
+        end
+        AUC = abs(trapz(FA, Hit));
+        AUC = min(max(AUC, 0.501), 0.999);
+        d_auc_all(rep, k) = -2 * erfcinv(2 * AUC);
+
+        % MLE d-prime (criteria as nuisance parameters)
+        theta0_fixed = [1.0; session.beta_hat(1); log(diff(session.beta_hat))'];
+        thFixed = fmincon(@(th) negLogLikFixed(th, ySignal, yCatch), ...
+            theta0_fixed, [], [], [], [], [0; -Inf(nCrit, 1)], [], ...
+            @(th) critBoundsFixed(th, cMax), opts);
+        d_mle_all(rep, k) = thFixed(1);
+    end
 
     fprintf('  Rep %3d/%d:  AB: A=%.3f b=%.3f  |  Fixed-b: b_used=%.3f Ith=%.3f\n', ...
         rep, nReps, session.A_hat, session.b_hat, b_fixed, Ithresh_hat);
@@ -177,6 +220,20 @@ for k = 1:nDPrime
         mean(log(I_hat_ab_all(:,k))), mean(log(I_hat_ab_all(:,k))) - log(I_true(k)), std(log(I_hat_ab_all(:,k))), ...
         mean(log(I_hat_fb_all(:,k))), mean(log(I_hat_fb_all(:,k))) - log(I_true(k)), std(log(I_hat_fb_all(:,k))));
 end
+
+fprintf('\n=== Fixed-intensity ROC validation — AB param (%d signal + %d catch per rep) ===\n', ...
+    nFixedSignal, nFixedCatch);
+hdr2 = '  %-14s  %7s  %8s  %8s  %6s  %8s  %8s  %6s\n';
+sep2 = repmat('-', 1, 74);
+fprintf(hdr2, '', 'd'' target', 'AUC mean', 'AUC bias', 'AUC SD', 'MLE mean', 'MLE bias', 'MLE SD');
+fprintf('  %s\n', sep2);
+for k = 1:nDPrime
+    fprintf('  d''=%.2f          %7.3f  %8.3f  %8+.3f  %6.3f  %8.3f  %8+.3f  %6.3f\n', ...
+        dPrimeTargets(k), dPrimeTargets(k), ...
+        mean(d_auc_all(:,k)), mean(d_auc_all(:,k)) - dPrimeTargets(k), std(d_auc_all(:,k)), ...
+        mean(d_mle_all(:,k)), mean(d_mle_all(:,k)) - dPrimeTargets(k), std(d_mle_all(:,k)));
+end
+fprintf('  %s\n', sep2);
 
 %% ---- Figure --------------------------------------------------------------
 
@@ -246,6 +303,11 @@ results.FixedB.b_fixed     = b_fixed_all;
 results.FixedB.Ithresh_hat = Ithresh_hat_all;
 results.FixedB.I_hat       = I_hat_fb_all;
 
+results.ROC.d_auc        = d_auc_all;
+results.ROC.d_mle        = d_mle_all;
+results.ROC.nFixedSignal = nFixedSignal;
+results.ROC.nFixedCatch  = nFixedCatch;
+
 results.A_true        = A_true;
 results.b_true        = b_true;
 results.Ithresh_true  = Ithresh_true;
@@ -261,6 +323,24 @@ end
 % Note: the AB fitting functions live in runYesNoTSDSession.m.
 % unpackCrit, Phi, responseFunction are duplicated here as local functions
 % because MATLAB local functions are file-scoped.
+
+function [c, ceq] = critBoundsFixed(theta, cMax)
+    beta = unpackCrit(theta(2:end));
+    c    = beta(:) - cMax;
+    ceq  = [];
+end
+
+function nll = negLogLikFixed(theta, ySignal, yCatch)
+    dPrime = theta(1);
+    beta   = unpackCrit(theta(2:end));
+    bounds = [-Inf, beta, Inf];
+    lo_s = bounds(ySignal);   hi_s = bounds(ySignal + 1);
+    lo_c = bounds(yCatch);    hi_c = bounds(yCatch  + 1);
+    p_s = max(Phi(hi_s(:) - dPrime) - Phi(lo_s(:) - dPrime), realmin);
+    p_c = max(Phi(hi_c(:))          - Phi(lo_c(:)),           realmin);
+    nll = -(sum(log(p_s)) + sum(log(p_c)));
+    if ~isfinite(nll);  nll = realmax;  end
+end
 
 function [c, ceq] = critBoundsFixedB(theta, cMax)
     beta = unpackCrit(theta(2:end));
