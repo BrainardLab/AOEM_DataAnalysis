@@ -203,7 +203,7 @@ fprintf('I_thresh   %.3f   %.3f    %+.3f   %.3f\n', ...
     Ithresh_true, mean(Ithresh_hat_all), mean(Ithresh_hat_all) - Ithresh_true, std(Ithresh_hat_all));
 
 thdr = '  %-10s  %8s  %9s  %9s  %7s  %9s  %9s  %7s\n';
-tdat = '  %-10s  %8.3f  %9.3f  %9+.3f  %7.3f  %9.3f  %9+.3f  %7.3f\n';
+tdat = '  %-10s  %8.3f  %9.3f  %+9.3f  %7.3f  %9.3f  %+9.3f  %7.3f\n';
 tsep = repmat('-', 1, 78);
 
 fprintf('\n=== Threshold intensity estimates (I) ===\n');
@@ -227,7 +227,7 @@ end
 fprintf('\n=== Fixed-intensity ROC validation — AB param (%d signal + %d catch per rep) ===\n', ...
     nFixedSignal, nFixedCatch);
 rhdr = '  %-10s  %9s  %9s  %7s  %9s  %9s  %7s\n';
-rdat = '  %-10s  %9.3f  %9+.3f  %7.3f  %9.3f  %9+.3f  %7.3f\n';
+rdat = '  %-10s  %9.3f  %+9.3f  %7.3f  %9.3f  %+9.3f  %7.3f\n';
 rsep = repmat('-', 1, 68);
 fprintf(rhdr, "d' target", 'AUC mean', 'AUC bias', 'AUC SD', 'MLE mean', 'MLE bias', 'MLE SD');
 fprintf('  %s\n', rsep);
