@@ -240,7 +240,7 @@ fprintf('  %s\n', sep2);
 colors = lines(nDPrime);
 
 figure('Color', 'w');
-tiledlayout(2, 2, 'TileSpacing', 'compact', 'Padding', 'compact');
+tiledlayout(3, 2, 'TileSpacing', 'compact', 'Padding', 'compact');
 
 % [1,1] b estimates: AB (estimated) vs fixed-b (drawn from calibration)
 nexttile;
@@ -291,6 +291,32 @@ for k = 1:nDPrime
 end
 xlabel('I_{hat}');
 title(sprintf('Fixed-b param  (b_{noise} SD=%.2f)', b_noise_sd));
+legend('Location', 'northeast');
+
+% [3,1] AUC d-prime estimates from fixed-intensity validation
+nexttile;
+hold on;
+for k = 1:nDPrime
+    histogram(d_auc_all(:,k), 10, 'FaceColor', colors(k,:), 'FaceAlpha', 0.6, ...
+        'DisplayName', sprintf("d'=%.2f", dPrimeTargets(k)));
+    xline(dPrimeTargets(k),          '-',  'Color', colors(k,:), 'LineWidth', 2,   'HandleVisibility', 'off');
+    xline(mean(d_auc_all(:,k)), '--', 'Color', colors(k,:), 'LineWidth', 1.5, 'HandleVisibility', 'off');
+end
+xlabel("d' estimate");
+title('AUC d-prime  (solid=target, dashed=mean)');
+legend('Location', 'northeast');
+
+% [3,2] MLE d-prime estimates from fixed-intensity validation
+nexttile;
+hold on;
+for k = 1:nDPrime
+    histogram(d_mle_all(:,k), 10, 'FaceColor', colors(k,:), 'FaceAlpha', 0.6, ...
+        'DisplayName', sprintf("d'=%.2f", dPrimeTargets(k)));
+    xline(dPrimeTargets(k),          '-',  'Color', colors(k,:), 'LineWidth', 2,   'HandleVisibility', 'off');
+    xline(mean(d_mle_all(:,k)), '--', 'Color', colors(k,:), 'LineWidth', 1.5, 'HandleVisibility', 'off');
+end
+xlabel("d' estimate");
+title('MLE d-prime  (solid=target, dashed=mean)');
 legend('Location', 'northeast');
 
 %% ---- Pack results --------------------------------------------------------
